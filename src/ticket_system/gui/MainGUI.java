@@ -302,40 +302,107 @@ public class MainGUI extends Application {
         java.util.List<TrainData> trains = new java.util.ArrayList<>();
 
         try {
-            // 简单的JSON解析，实际应该使用Jackson等库
+            System.out.println("开始解析车次数据: " + jsonData);
+
+            // 移除外层的SUCCESS|前缀（如果存在）
+            if (jsonData.startsWith("SUCCESS|")) {
+                jsonData = jsonData.substring(8);
+            }
+
+            // 简单的JSON解析
             // 格式: [{"trainNumber":"G1001","departure":"北京","destination":"上海","seatInventory":{"二等座":100,"一等座":50}},...]
 
+            // 分割每个车次对象
             String[] trainObjects = jsonData.split("\\},\\{");
 
-            for (String trainObj : trainObjects) {
+            for (int i = 0; i < trainObjects.length; i++) {
+                String trainObj = trainObjects[i];
+
                 // 清理字符串
-                trainObj = trainObj.replace("[{", "").replace("}]", "").replace("{", "").replace("}", "").trim();
+                trainObj = trainObj.trim();
+                if (i == 0) trainObj = trainObj.replace("[{", "");
+                if (i == trainObjects.length - 1) trainObj = trainObj.replace("}]", "");
+                trainObj = trainObj.replace("{", "").replace("}", "");
+
+                System.out.println("解析车次对象: " + trainObj);
 
                 String trainNumber = extractJsonValue(trainObj, "trainNumber");
                 String departure = extractJsonValue(trainObj, "departure");
                 String destination = extractJsonValue(trainObj, "destination");
 
-                // 提取座位库存
-                String seatInventory = extractJsonValue(trainObj, "seatInventory");
+                // 提取座位库存 - 改进的解析方法
                 int secondClass = 0;
                 int firstClass = 0;
 
-                if (seatInventory != null) {
-                    String secondClassStr = extractJsonValue(seatInventory, "二等座");
-                    String firstClassStr = extractJsonValue(seatInventory, "一等座");
+                // 直接在整个字符串中搜索座位类型
+                String secondClassStr = extractSeatCount(trainObj, "二等座");
+                String firstClassStr = extractSeatCount(trainObj, "一等座");
 
-                    if (secondClassStr != null) secondClass = Integer.parseInt(secondClassStr);
-                    if (firstClassStr != null) firstClass = Integer.parseInt(firstClassStr);
+                if (secondClassStr != null) {
+                    try {
+                        secondClass = Integer.parseInt(secondClassStr);
+                    } catch (NumberFormatException e) {
+                        System.err.println("解析二等座数量失败: " + secondClassStr);
+                    }
                 }
 
-                trains.add(new TrainData(trainNumber, departure, destination, secondClass, firstClass));
+                if (firstClassStr != null) {
+                    try {
+                        firstClass = Integer.parseInt(firstClassStr);
+                    } catch (NumberFormatException e) {
+                        System.err.println("解析一等座数量失败: " + firstClassStr);
+                    }
+                }
+
+                System.out.println("解析结果: " + trainNumber + " - 二等座:" + secondClass + ", 一等座:" + firstClass);
+
+                if (trainNumber != null && departure != null && destination != null) {
+                    trains.add(new TrainData(trainNumber, departure, destination, secondClass, firstClass));
+                }
             }
 
         } catch (Exception e) {
             System.err.println("解析车次JSON失败: " + e.getMessage());
+            e.printStackTrace();
         }
 
+        System.out.println("解析完成，共 " + trains.size() + " 个车次");
         return trains;
+    }
+
+    /**
+     * 从JSON字符串中提取座位数量
+     */
+    private String extractSeatCount(String json, String seatType) {
+        try {
+            // 搜索模式："二等座":100 或 "二等座": 100
+            String pattern = "\"" + seatType + "\":";
+            int startIndex = json.indexOf(pattern);
+            if (startIndex == -1) return null;
+
+            startIndex += pattern.length();
+
+            // 找到数字的开始位置
+            while (startIndex < json.length() &&
+                    (json.charAt(startIndex) == ' ' || json.charAt(startIndex) == ':')) {
+                startIndex++;
+            }
+
+            // 提取数字
+            int endIndex = startIndex;
+            while (endIndex < json.length() &&
+                    Character.isDigit(json.charAt(endIndex))) {
+                endIndex++;
+            }
+
+            if (endIndex > startIndex) {
+                return json.substring(startIndex, endIndex);
+            }
+
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -343,25 +410,15 @@ public class MainGUI extends Application {
      */
     private String extractJsonValue(String json, String key) {
         try {
-            String searchKey = "\"" + key + "\":";
-            int startIndex = json.indexOf(searchKey);
+            String pattern = "\"" + key + "\":\"";
+            int startIndex = json.indexOf(pattern);
             if (startIndex == -1) return null;
 
-            startIndex += searchKey.length();
-            int endIndex = json.indexOf(",", startIndex);
-            if (endIndex == -1) {
-                endIndex = json.indexOf("}", startIndex);
-            }
+            startIndex += pattern.length();
+            int endIndex = json.indexOf("\"", startIndex);
             if (endIndex == -1) return null;
 
-            String value = json.substring(startIndex, endIndex).trim();
-
-            // 去除引号
-            if (value.startsWith("\"") && value.endsWith("\"")) {
-                value = value.substring(1, value.length() - 1);
-            }
-
-            return value;
+            return json.substring(startIndex, endIndex);
         } catch (Exception e) {
             return null;
         }
